@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ccxml version="1.0" xmlns="http://www.w3.org/2002/09/ccxml">
+
+<!-- Session, connection and dialog IDs -->
+<var name="session_id"/>
+<var name="connection_id"/>
+<var name="dialog_id"/>
+
+<!-- Variables to hold caller information -->
+<var name="callerAni"/>
+<var name="callerZip"/>
+<var name="callerTwitterID"/>
+
+<!-- State variable -->
+<var name="myState" expr="'init'"/>
+
+<script>
+<![CDATA[
+
+// Function to check if a variable is set
+function isSet(myVar) {
+
+	try {
+		if(typeof(myVar) == 'undefined') { return false; }
+		else if(myVar == null) { return false; }
+		else if(myVar.length && myVar.length == 0) { return false; }
+		return true;
+	}
+	catch(e) {
+		ccxmllog('*** Could not check variable: ' + myVar + '. ***' );
+		return false;
+	}
+
+}
+
+]]>
+</script>
+
+<eventprocessor statevariable="myState">
+
+  	<transition state="init" event="ccxml.loaded">
+		<log expr="'*** DOCUMENT LOADED ***'"/>
+		<assign name="session_id" expr="event$.sessionid"/>
+  	</transition>
+  	
+<!-- ************************************************* 	-->
+<!-- Get caller ANI and look up their zip code 			-->
+<!-- ************************************************* 	-->
+
+  	<transition state="init" event="connection.alerting">
+	    <assign name="connection_id" expr="event$.connectionid"/>
+	    <assign name="callerAni" expr="event$.connection.remote"/>
+	    <assign name="myState" expr="'lookup'"/>
+	    <send name="'lookUpCaller'" target="'php/lookUpCaller.php'" targettype="'basichttp'" namelist="callerAni"/>
+  	</transition>
+	
+	<transition state="lookup" event="lookupComplete">
+		<log expr="'*** LOOKUP COMPELETE. PREPARE DIALOG ***'"/>
+		<assign name="callerZip" expr="event$.callerZip"/>
+		<assign name="callerTwitterID" expr="event$.callerTwitterID"/>
+		<assign name="myState" expr="'preparing'"/>
+		<dialogprepare src="'vxml/mainDialog.vxml'" dialogid="dialog_id" type="'application/voicexml+xml'" namelist="callerZip callerTwitterID"/>
+	</transition>
+	
+	<transition state="lookup" event="lookupError">
+		<log expr="'*** CALLER NOT REGISTERED ***'"/>
+		<assign name="myState" expr="'notRegistered'"/>
+		<accept connectionid="connection_id"/>
+	</transition>
+	
+	<transition state="lookup" event="error.send.failed">
+		<log expr="'*** ERROR: COULD NOT LOOKUP CALLER ***'"/>
+		<assign name="myState" expr="'techDiff'"/>
+		<accept connectionid="connection_id"/>
+	</transition>
+	
+<!-- ************************************************* 	-->
+<!-- When dialog is preapred, accept inbound call.		-->
+<!-- ************************************************* 	-->
+
+	<transition state="preparing" event="dialog.prepared">
+		<log expr="'*** DIALOG PREPARED. ACCEPT CALL ***'"/>
+		<assign name="myState" expr="'accepting'"/>
+		<accept connectionid="connection_id"/>
+	</transition>
+	
+	<transition state="preparing" event="error.dialog.notprepared">
+		<log expr="'*** ERROR: DIALOG COULD NOT BE PREPARED ***'"/>
+		<assign name="myState" expr="'error'"/>
+		<send name="'techDiff'" target="session_id" targettype="'ccxml'"/>
+	</transition>
+	
+	
+<!-- ************************************************* 	-->
+<!-- Accept the call and send caller to main dialog		-->
+<!-- ************************************************* 	-->
+
+	<transition state="accepting" event="connection.connected">
+		<log expr="'*** CALL CONNECTED. SENDING CALLER TO MAIN DIALOG ***'"/>
+		<assign name="myState" expr="'mainDialog'"/>
+		<dialogstart prepareddialogid="dialog_id" connectionid="connection_id" />
+	</transition>
+	
+<!-- ************************************************* 	-->
+<!-- Caller has exited the main dialog					-->
+<!-- ************************************************* 	-->
+
+	<transition state="mainDialog" event="dialog.exit">
+		<log expr="'*** CALLER HAS LEFT THE MAIN DIALOG ***'"/>
+		
+		<!-- If an error occured in the dialog, plat the technical difficulties message to the caller -->
+		<if cond="isSet(event$.values.dialogErrorMessage) || isSet(event$.values.errorReason)">
+			<log expr="'*** ERROR: ' + event$.values.dialogErrorMessage + ' ***'"/>
+			<assign name="myState" expr="'error'"/>
+			<send name="'techDiff'" target="session_id" targettype="'ccxml'"/>
+		<else/>
+			<log expr="'*** CALL IS OVER ***'"/>
+			<exit/>
+		</if>
+		
+	</transition>
+	
+<!-- ************************************************* 	-->
+<!-- Play message if caller is not registered 			-->
+<!-- ************************************************* 	-->	
+
+	<transition state="notRegistered" event="connection.connected">
+		<log expr="'*** PLAY THE NOT REGISTERED MESSAGE TO CALLER ***'"/>
+		<dialogstart src="'vxml/notRegistered.vxml'" connectionid="connection_id" dialogid="dialog_id" type="'application/voicexml+xml'"/>
+	</transition>
+
+
+<!-- ************************************************* 	-->
+<!-- Play a technical difficulties message to caller	-->
+<!-- ************************************************* 	-->
+
+	<transition state="techDiff" event="connection.connected">
+		<log expr="'*** PLAY THE TECHNICAL DIFFICULTIES MESSAGE TO CALLER ***'"/>
+		<dialogstart src="'vxml/techDiff.vxml'" connectionid="connection_id" dialogid="dialog_id" type="'application/voicexml+xml'"/>
+	</transition>
+
+	<transition state="notRegistered techDiff" event="dialog.exit">
+		<log expr="'*** CALL IS OVER ***'"/>
+		<exit/>
+	</transition>
+	
+	<transition event="connection.disconnected">
+		<log expr="'*** CALLER HUNG UP ***'"/>
+		<exit/>
+	</transition>
+	
+
+	<transition event="error.*">
+		<log expr="'*** AN ERROR HAS OCCURRED: [' + event$.reason + '] ***'"/>
+		<exit/>
+	</transition>
+
+</eventprocessor>
+
+</ccxml>
+

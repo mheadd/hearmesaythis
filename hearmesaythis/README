@@ -1,0 +1,68 @@
+HEAR ME SAY THIS
+
+Created by: Mark J. Headd, www.voiceingov.org
+Submitted to: Apps for America (http://www.sunlightlabs.com/appsforamerica/)
+
+*****
+Description:
+
+HEAR ME SAY THIS is an innovative new service that lets you send a message to Congress using your own voice.  We let you use an ordinary telephone to harness the power of Twitter to communicate with the people that represent you in both the U.S. House and Senate.
+
+After you record your message, we'll post a Tweet to the HEAR ME SAY THIS Twitter stream. We post your message as a Twitter @Reply, so you should be able to see it in your @Replies tab when you log into Twitter. If you are following Hear Me Say This, you should be able to see this in your public timeline. 
+
+When we post your recording to Twitter, we will include the Twitter user names of the people representing you in Congress or, if they are not yet using Twitter, a #hashtag with their office and district number. For example:
+
+  * A #hashtag for the 25th Congressional District in New York would look like: #hmst-ny-r25
+  * A #hashtag for North Carolina’s senior Senate Seat would look like: #hmst-nc-ss
+  * A #hashtag for Delaware’s junior Senate Seat would look like: #hmst-de-sj
+
+If your Representatives or Senators are using Twitter, they will see your message in their @Replies tab as well! 
+
+*****
+Install and set up:
+
+HEAR ME SAY THIS requires PHP 5 and a MySQL database.  The application uses scripts that are most easily run using cron on a Linux/UNIX based system.
+
+Open the file called php/config.php - enter database and API credentials here.
+
+You will need to download a CCXML/VoiceXML browser.  A high quality, free CCXML/VoiceXML browser that runs on Windows or Linux can be obtained from http://www.voxeo.com/prophecy/.
+
+You will need to set up a call route on your CCXML platform that points to the hearmesaythis.xml document - this is the call control document that will answer the inbound call, lookup up the caller based on their ANI and handle any exceptions that occur during the call (if any).  The links to all VoiceXML dialogs, resources and media are all relative links from the hearmesaythis.xml CCXML document.
+
+A brief summary of how to set up a call route in Voxeo Prophecy to the hearmesaythis.xml document is below:
+
+  1. Make sure Prophecy services are started.
+  2. Open the Prophecy Management Console (http://prophecy_host:9995/mc.php).  Default login credentials are admin/admin.
+  3. In the "Call Roting" tab, set up a route for the application:
+	- Set the Route ID to an alphanumeric string or a 10 digit phone number (e.g., sunlight, 2021234567).
+	- Set the Route Type to CCXML W3C
+	- Set the Route URL to http://host/www/hearmesaythis.xml
+	- At the bottom of this page, click "Save Changes"
+
+*****
+Scripts
+
+Move the directory entitled scripts/ out of your web root.  This directory can be moved anywhere you like, but you should probably just put it in your home directory (i.e., /home/username).
+
+In order to run these scripts, you will need to do the following:
+
+  * Create symlinks to the required files that will be used by the updateTwitterStatus.php script (for example, ln -s path/to/confg.php config.php).  
+  * Do this for each of the required file listed at the top of the updateTwitterStatus.php script.
+  * Make sure both scripts are executable.
+  * Set up cron jobs to run both the updateTwitterStatus.php and convertToMP3.sh scripts at the appropriate intervals.
+
+*****
+Setting up Cron Jobs
+
+An example of the cron entries needed to run these scripts is below:
+
+	# Run the MP3 conversion every 15 minutes
+	*/15 * * * * /home/user/scripts/convertToMP3.sh "/path/to/application/recordings/wavs/" "dbuser" "dbpassword" "dbname" >/dev/null 2>>/path/to/logs/logfile.txt
+
+	# Update Twitter every 30 minutes
+	*/30 * * * * php /home/user/scripts/updateTwitterStatus.php >/dev/null 2>&1
+
+
+The first entry wull run the MP3 conversion script every 15 minutes (set this interval to your liking).  When invoked, you will pass in 4 things - the directory that stores the WAV files recorded by the VoiceXML application (set this using the $baseRecordingDirectory variable in php/config.php), and the database credentials needed to access the twitter_queue table.  stdout just gets shoved into the bit bucket, while stderr is logged.
+
+The second entry will invoke the updateTwitterStatus.php script - this is the scipt that actually invokes the Twitter API.  We send both stdout and stderr to the bit bucket, as the script itself will log the API response.

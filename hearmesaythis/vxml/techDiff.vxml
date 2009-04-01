@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vxml version = "2.1">
+<form id="F_1">
+<block>
+<prompt>Sorry. The system is experiencing techncial difficulties.</prompt>
+<prompt>Please try your call again later. </prompt>
+<exit/>
+</block>
+</form>
+</vxml>

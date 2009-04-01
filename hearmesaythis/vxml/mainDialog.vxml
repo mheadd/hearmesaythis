@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?> 
+<vxml version = "2.1">
+
+<property name="inputmodes" value="dtmf"/>
+
+<!-- Variable to hold dialog error message to return to CCXML -->
+<var name="dialogErrorMessage"/>
+
+<!-- Variables used to help control prompting -->
+<var name="counter" expr="0"/>
+<var name="firstListen" expr="true"/>
+
+<!-- Zip code submitted with dialog preapre -->
+<var name="callerZip" expr="session.connection.ccxml.values.callerZip"/>
+<var name="callerTwitterID" expr="session.connection.ccxml.values.callerTwitterID"/>
+
+<!-- List ot hold the twitter names / hashtags to use when sending message -->
+<var name="twitterList"/>
+
+<!-- Script that holds the JSON object with legislator information -->
+<script srcexpr="'../php/getSunlightJSON.php?callerZip=' + callerZip"/>
+
+<script>
+<![CDATA[
+
+// Array to hold full names of political parties to read back to caller
+var parties = Array();
+parties['D'] = 'Democrat';
+parties['R'] = 'Republican';
+parties['I'] = 'Independent';
+
+function sayParty(party) {
+  return parties[party];
+}
+
+]]>
+</script>
+
+<!-- handlers for noinput / nomatch events -->
+<catch event="noinput nomatch">
+  <reprompt/>
+</catch>
+
+<catch event="noinput nomatch" count="4">
+  <log>*** Caller exceeded max errors ***</log>
+  <prompt>You seem to be having trouble.  Try your call again another time.</prompt>
+  <exit namelist="dialogErrorMessage"/>
+</catch>
+
+<catch event="error.*">
+	<log>*** AN ERROR OCCURED IN THE DIALOG ***</log>
+	<assign name="dialogErrorMessage" expr="'An error occured: ' + _event + ': ' + _message + '.'"/>
+	<exit namelist="dialogErrorMessage"/>
+</catch>
+
+<!-- Play a welcome message to the caller -->
+<form id="welcome">
+<property name="bargein" value="false"/>
+	<block>
+		<audio src="../audio/hearmesaythis.wav"/>
+		<prompt>Welcome to hear me say this.</prompt>
+		<goto next="#F_1"/>
+	</block>
+</form>
+
+<form id="F_1">
+
+<catch event="error.badfetch">
+  <assign name="dialogErrorMessage" expr="'Could not save message.'"/>
+  <exit namelist="dialogErrorMessage"/>
+</catch>
+
+<catch event="reviewNames">
+<assign name="firstListen" expr="false"/>
+<foreach item="i" array="sunlightResponse.response.legislators">
+  <!-- Title and name -->
+	<prompt>
+    <value expr="i.legislator.title == 'Rep' ? 'Representative' : 'Senator'"/> 
+    <value expr="i.legislator.firstname"/> 
+    <value expr="i.legislator.middlename"/> 
+    <value expr="i.legislator.lastname"/>
+		<break strength="x-weak"/>
+  </prompt>
+	
+	<!-- Party and district-->
+	<prompt>
+  	<value expr="sayParty(i.legislator.party)"/>
+		<break strength="x-weak"/>
+		<value expr="i.legislator.title == 'Rep' ? 'District ' + i.legislator.district : i.legislator.district"/>
+		<break strength="weak"/>
+	</prompt>
+</foreach>
+<reprompt/>
+</catch>
+
+<field name="mainMenu">
+  <grammar mode="dtmf" version="1.0" root="main">
+    <rule id="main">
+      <one-of>
+        <item>1</item>
+        <item>2</item>
+      </one-of>
+    </rule>
+  </grammar>
+  <prompt cond="firstListen">To hear the names of the people that represent your zip code in Congress, press 1.</prompt>
+  <prompt cond="firstListen">If you already know who these people are, and you are ready to record your message, press 2.</prompt>
+  <prompt cond="!firstListen">To hear these names again, press 1.</prompt>  
+  <prompt cond="!firstListen">If you are ready to record your message, press 2.</prompt>
+  <filled>
+    <if cond="mainMenu == 1">
+    	<clear namelist="mainMenu"/>
+		<throw event="reviewNames"/>
+		</if>
+  </filled>
+</field>
+
+<record name="recordMessage" beep="true" dtmfterm="true" finalsilence="5s" maxtime="60s">
+  <prompt>
+    Record your 60 second message after the beep.  
+    When you are done, you will have a chance to listen to it, and re-record it if you like. 
+    Press the pound key when you are finished.
+  </prompt>
+</record>
+
+
+<field name="reviewMessage">
+  <grammar mode="dtmf" version="1.0" root="main">
+    <rule id="main">
+      <one-of>
+        <item>1</item>
+        <item>2</item>
+		<item>3</item>
+      </one-of>
+    </rule>
+  </grammar>
+	<prompt>
+  	To listen to the message you just recorded, press 1.
+  	To re-record your message, press 2.
+  	If you are ready to send your message, press 3.
+	</prompt>
+	<filled>
+  	<if cond="reviewMessage == 1">
+  		<audio expr="recordMessage">
+  			<break strength="weak"/>
+			</audio>
+  		<clear namelist="reviewMessage"/>
+  	<elseif cond="reviewMessage == 2"/>
+    	<clear namelist="recordMessage reviewMessage"/>
+  	</if>
+	</filled>
+</field>
+
+<field name="chooseRecipients">
+  <grammar mode="dtmf" version="1.0" root="main">
+    <rule id="main">
+      <one-of>
+        <item>1</item>
+        <item>2</item>
+      </one-of>
+    </rule>
+  </grammar>
+  <prompt>Who do you want to send your message to?</prompt>
+  <prompt>To send your message to all members of Congress representing your zip code, press 1.</prompt>
+  <prompt>To send your message to a specific member, press 2.</prompt>
+  <filled>
+    <if cond="chooseRecipients == 1">
+    <assign name="twitterList" expr="JSON.stringify(createTwitterList('all'))"/>
+    <data name="SaveMessage" namelist="recordMessage twitterList" src="../php/saveMessage.php" method="post" enctype="multipart/form-data"/>
+    <goto next="#F_2"/>
+  	</if>
+  </filled>
+</field>
+
+<field name="onlySendToOne" type="digits?length=1">
+  <prompt>
+  <foreach item="i" array="sunlightResponse.response.legislators">
+      To send your message to
+      <break strength="x-weak"/>
+      <value expr="i.legislator.title == 'Rep' ? 'Representative' : 'Senator'"/> 
+      <value expr="i.legislator.firstname"/> 
+      <value expr="i.legislator.middlename"/> 
+      <value expr="i.legislator.lastname"/>
+  	  <break strength="x-weak"/>
+  	  Press <value expr="counter+1"/>.
+	  <assign name="counter" expr="counter+1"/>
+  </foreach>
+  </prompt>
+  <filled>
+    <if cond="onlySendToOne &gt; sunlightResponse.response.legislators.length">
+      <prompt>Sorry, that is not a valid choice.</prompt>
+      <clear namelist="onlySendToOne"/>
+	  <assign name="counter" expr="0"/>
+      <throw event="nomatch"/>
+    <else/>
+    <assign name="twitterList" expr="JSON.stringify(createTwitterList(onlySendToOne-1))"/>
+    <data name="SaveMessage" namelist="recordMessage twitterList" src="../php/saveMessage.php" method="post" enctype="multipart/form-data"/>
+    <goto next="#F_2"/>
+    </if>
+  </filled>
+</field>
+
+</form>
+
+<form id="F_2">
+	<block>
+		<audio src="../audio/golf.wav"/>
+		<prompt>Your message has been recorded and will be sent shortly.  Check your Twitter account to see when the message is sent to your representatives in Congress.</prompt>
+		<prompt>thanks for using Hear Me Say This.</prompt>
+		<exit namelist="dialogErrorMessage"/>
+	</block>
+</form>
+
+</vxml> 
